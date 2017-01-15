@@ -5,12 +5,157 @@
 
 \section{目的}
 
-本研究の目的は、一定のルールでソースコードを日本語に変換することによって可読性を高め、プログラムを理解するコストを下げることができるかどうかを検証することである。今回はプログラミング言語はpythonを選んだ。pythonは簡潔に記述できることがメリットのプログラミング言語であると同時に、変数宣言と代入の区別がないことやインデントでのブロック管理、型がないなど可読性という面ではほかの言語よりも劣っている面が多い言語である。つまりpythonで効果を実証できればほかの言語でも、一定の効果が得られる可能性は高い。よって本論文ではpythonを例に日本語に変換する機能を実装しいくつかの例題で評価をとり、実際にソースコードの理解を補助することができるのかを検証する。
+本研究での目的は、ソースコードの理解に要するコストを下げ、デベロッパが既存のコードをより素早く容易に理解できるようになることである。
 
 \section{手法}
 
-検証するための手法として、まずpythonのコードを機械的に日本語に翻訳する。そして出力された日本語と、同じ処理をするプログラミング言語「ひまわり」のコードと比較してアンケートを取りその結果を検証結果とする。
+ソースコードを理解することを難解にしている原因として、普段使っている自然言語との相違があることが考えられる。プログラミング言語は論理的な式の集合であることや、識別子などの記号的な表記がなされている。このように普段から使用している母国語との構造的な違いがプログラミング言語の理解を妨げている要因の一つである考えられる。よって、本論文ではプログラミング言語の一つであるpythonを例にとり、記述してある処理を母国語である日本語に変換し、ソースコードを理解しやすくなるのかを検証する。
 
 \section{日本語変換}
 
-ソースコードから日本語に変換する処理の流れとしてはpythonの抽象構文木を日本語にしてく
+プログラミング言語は記号を決められた文法通りに並べて処理を表現する。自然言語は様々な品詞の単語を並べて文とする。なのでプログラミング言語の記号的な表現をどうやって自然言語に置き換えるかが課題になる。
+プログラミング言語の文法は抽象構文木という構造で定義される。pythonも例にもれず抽象構文木が定義されており、処理系によってチェックされる。pythonの抽象構文木は以下のように定義されている。
+
+\begin{itembox}[l]{python抽象構文木}
+\begin{verbatim}
+module Python
+{
+    mod = Module(stmt* body)
+        | Interactive(stmt* body)
+        | Expression(expr body)
+
+        -- not really an actual node but useful in Jython's typesystem.
+        | Suite(stmt* body)
+
+    stmt = FunctionDef(identifier name, arguments args,
+                       stmt* body, expr* decorator_list, expr? returns)
+          | AsyncFunctionDef(identifier name, arguments args,
+                             stmt* body, expr* decorator_list, expr? returns)
+
+          | ClassDef(identifier name,
+             expr* bases,
+             keyword* keywords,
+             stmt* body,
+             expr* decorator_list)
+          | Return(expr? value)
+
+          | Delete(expr* targets)
+          | Assign(expr* targets, expr value)
+          | AugAssign(expr target, operator op, expr value)
+
+          -- use 'orelse' because else is a keyword in target languages
+          | For(expr target, expr iter, stmt* body, stmt* orelse)
+          | AsyncFor(expr target, expr iter, stmt* body, stmt* orelse)
+          | While(expr test, stmt* body, stmt* orelse)
+          | If(expr test, stmt* body, stmt* orelse)
+          | With(withitem* items, stmt* body)
+          | AsyncWith(withitem* items, stmt* body)
+
+          | Raise(expr? exc, expr? cause)
+          | Try(stmt* body, excepthandler* handlers, stmt* orelse, stmt* finalbody)
+          | Assert(expr test, expr? msg)
+
+          | Import(alias* names)
+          | ImportFrom(identifier? module, alias* names, int? level)
+
+          | Global(identifier* names)
+          | Nonlocal(identifier* names)
+          | Expr(expr value)
+          | Pass | Break | Continue
+
+          -- XXX Jython will be different
+          -- col_offset is the byte offset in the utf8 string the parser uses
+          attributes (int lineno, int col_offset)
+
+          -- BoolOp() can use left & right?
+    expr = BoolOp(boolop op, expr* values)
+         | BinOp(expr left, operator op, expr right)
+         | UnaryOp(unaryop op, expr operand)
+         | Lambda(arguments args, expr body)
+         | IfExp(expr test, expr body, expr orelse)
+         | Dict(expr* keys, expr* values)
+         | Set(expr* elts)
+         | ListComp(expr elt, comprehension* generators)
+         | SetComp(expr elt, comprehension* generators)
+         | DictComp(expr key, expr value, comprehension* generators)
+         | GeneratorExp(expr elt, comprehension* generators)
+         -- the grammar constrains where yield expressions can occur
+         | Await(expr value)
+         | Yield(expr? value)
+         | YieldFrom(expr value)
+         -- need sequences for compare to distinguish between
+         -- x < 4 < 3 and (x < 4) < 3
+         | Compare(expr left, cmpop* ops, expr* comparators)
+         | Call(expr func, expr* args, keyword* keywords)
+         | Num(object n) -- a number as a PyObject.
+         | Str(string s) -- need to specify raw, unicode, etc?
+         | Bytes(bytes s)
+         | NameConstant(singleton value)
+         | Ellipsis
+
+         -- the following expression can appear in assignment context
+         | Attribute(expr value, identifier attr, expr_context ctx)
+         | Subscript(expr value, slice slice, expr_context ctx)
+         | Starred(expr value, expr_context ctx)
+         | Name(identifier id, expr_context ctx)
+         | List(expr* elts, expr_context ctx)
+         | Tuple(expr* elts, expr_context ctx)
+
+          -- col_offset is the byte offset in the utf8 string the parser uses
+          attributes (int lineno, int col_offset)
+
+    expr_context = Load | Store | Del | AugLoad | AugStore | Param
+
+    slice = Slice(expr? lower, expr? upper, expr? step)
+          | ExtSlice(slice* dims)
+          | Index(expr value)
+
+    boolop = And | Or
+
+    operator = Add | Sub | Mult | MatMult | Div | Mod | Pow | LShift
+                 | RShift | BitOr | BitXor | BitAnd | FloorDiv
+
+    unaryop = Invert | Not | UAdd | USub
+
+    cmpop = Eq | NotEq | Lt | LtE | Gt | GtE | Is | IsNot | In | NotIn
+
+    comprehension = (expr target, expr iter, expr* ifs)
+
+    excepthandler = ExceptHandler(expr? type, identifier? name, stmt* body)
+                    attributes (int lineno, int col_offset)
+
+    arguments = (arg* args, arg? vararg, arg* kwonlyargs, expr* kw_defaults,
+                 arg? kwarg, expr* defaults)
+
+    arg = (identifier arg, expr? annotation)
+           attributes (int lineno, int col_offset)
+
+    -- keyword arguments supplied to call (NULL identifier for **kwargs)
+    keyword = (identifier? arg, expr value)
+
+    -- import name with optional 'as' alias.
+    alias = (identifier name, identifier? asname)
+
+    withitem = (expr context_expr, expr? optional_vars)
+}
+\end{verbatim}
+\end{itembox}
+
+大まかには識別子などの記号の集合が式になり、さらに記号と式の集合が文になり、文を制御構造に倣って並べることによって処理を記述し、処理の集合をモジュール、つまり一つの翻訳単位と定義されている。先頭にAsyncがついている構文はバージョン3.5から追加された機能で、非同期処理を記述するためのものだが、本論文では考慮しないものとする。
+本論文では、サブルーチンには考慮せず一つのメソッド内において日本語変換処理をする。
+
+\section{複合文の変換}
+
+pythonにおいて、複合文は制御構造を明示的に記述するために用いられる。複合文の処理の区切りはインデントで管理され、同じ深さのブロックは同じインデントで記述される。一つまたは文の集合として記述される。
+
+\subsection{条件分岐}
+
+条件分岐はtest式を条件式として、真の場合はbody文を、偽ならばorelse文を実行するという構成になっている。なので、文に変換するときは「targetの結果が成り立つならばbodyを処理、偽ならばorelseを処理」というように変換する。このように表記することでブロックの始まりと終わりを明示的に示す。
+
+\subsection{ループ}
+
+ループにはfor文かwhile文も用いる。for文の場合はiterで指定したイテレータの先頭からtargetに代入し、body文を処理し、すべての要素を代入し終えるとorelse文を処理するという構成になっている。pythonではループ回数を明示的に示すことはせずjavaの拡張for文のようになっている。なので、処理がわかるように日本語に変換すると「iterの最初の要素をtargetに代入して、body文を処理、iterの次の要素をtargetに代入してもう一度処理、最後の要素ならばorelse文を処理」というように記述できる。while文はtest式が真の限りbody文をループし、偽になるとorelse文を実行してループ処理を終了する。よってwhile文は「testに結果が成り立っている間、body文をループ。偽ならばorelse文を処理。」というように変換する。
+
+\subsection{その他の複合文}
+
+その他の複合文には、エラーを処理するtry～except～finally文と、処理を安全に記述するためのwith文がある。try文はbody文を処理しているときにhandler.typeで指定、または指定がなければ何らかのエラーが出た際にhandler.body文を処理する。orelse文は正常終了時に処理され、finally文はいかなる場合でも実行される。日本語に置き換えるには「body文の処理中に、handler.typeエラーが発生したら、handler.body文を実行
